@@ -39,8 +39,6 @@ const FUND_FAMILY_HINTS = [
   'VANGUARD', 'VICTORY', 'WASATCH'
 ];
 
-let secTickerIndexPromise = null;
-
 function normalizeWhitespace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -93,18 +91,6 @@ function buildSearchQueries(name) {
 
   return [...new Set(
     [base, stripped, standardized, original]
-      .map(normalizeWhitespace)
-      .filter(Boolean)
-  )];
-}
-
-function buildSecNameVariants(name) {
-  const standardized = standardizeName(name);
-  const stripped = stripDescriptors(standardized);
-  const base = removeClassMarkers(stripped);
-
-  return [...new Set(
-    [standardized, stripped, base]
       .map(normalizeWhitespace)
       .filter(Boolean)
   )];
@@ -264,64 +250,6 @@ async function tryYahoo(name) {
   return bestMatch && bestMatch.score >= 45 ? bestMatch.ticker : null;
 }
 
-async function getSecTickerIndex() {
-  if (!secTickerIndexPromise) {
-    secTickerIndexPromise = (async () => {
-      const response = await fetchJson('https://www.sec.gov/files/company_tickers.json', {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'TickerSymbols/1.0 https://github.com/luke2003-lang/TickerSymbols'
-        }
-      }, 12000);
-
-      if (!response.ok) {
-        throw new Error(`SEC lookup failed with status ${response.status}`);
-      }
-
-      const payload = await response.json();
-      const exactMatches = new Map();
-
-      for (const record of Object.values(payload || {})) {
-        const ticker = sanitizeTicker(String(record?.ticker || '').replace(/\./g, '-'));
-        const title = record?.title;
-        if (!ticker || !title) {
-          continue;
-        }
-
-        for (const variant of buildSecNameVariants(title)) {
-          if (!exactMatches.has(variant)) {
-            exactMatches.set(variant, ticker);
-          }
-        }
-      }
-
-      return exactMatches;
-    })().catch(error => {
-      secTickerIndexPromise = null;
-      console.error('SEC lookup failed', { error: error?.message });
-      return null;
-    });
-  }
-
-  return secTickerIndexPromise;
-}
-
-async function trySec(name) {
-  const index = await getSecTickerIndex();
-  if (!index) {
-    return null;
-  }
-
-  for (const variant of buildSecNameVariants(name)) {
-    const ticker = index.get(variant);
-    if (ticker) {
-      return ticker;
-    }
-  }
-
-  return null;
-}
-
 function extractGeminiText(payload) {
   const parts = payload?.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) {
@@ -418,11 +346,6 @@ export default async function handler(req, res) {
   const { name } = req.body || {};
   if (!name) {
     return res.status(400).json({ error: 'Missing name' });
-  }
-
-  const sec = await trySec(name);
-  if (sec) {
-    return res.status(200).json({ ticker: sec, source: 'SEC Company Tickers' });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;

@@ -421,7 +421,7 @@
 
 <script>
   let df = [], ticker_cache = {}, source_cache = {};
-  const LOOKUP_CONCURRENCY = 6;
+  const LOOKUP_CONCURRENCY = 3;
 
   function goTo(id) {
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));

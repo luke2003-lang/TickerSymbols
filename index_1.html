@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>California Inheritance Group</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f7f5f0;
+      color: #1a1814;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      background: #fff;
+      border-bottom: 0.5px solid #e0ddd6;
+      padding: 0 2rem;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .logo {
+      font-family: 'EB Garamond', serif;
+      font-size: 17px;
+      color: #8a6f2e;
+      letter-spacing: 0.04em;
+    }
+
+    .topbar-right {
+      font-size: 11px;
+      color: #c8c4bc;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .page {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2.5rem 1rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 620px;
+    }
+
+    .eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: #8a6f2e;
+      text-transform: uppercase;
+      margin-bottom: 0.4rem;
+    }
+
+    header h1 {
+      font-family: 'EB Garamond', serif;
+      font-size: 28px;
+      font-weight: 400;
+      color: #1a1814;
+      margin-bottom: 0.3rem;
+      line-height: 1.2;
+    }
+
+    header p {
+      font-size: 13px;
+      color: #8a8880;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+
+    .section-label {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: #aaa89e;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+
+    .card {
+      background: #fff;
+      border: 0.5px solid #e0ddd6;
+      border-radius: 4px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .card-hint {
+      font-size: 12px;
+      color: #aaa89e;
+      margin-bottom: 0.75rem;
+      line-height: 1.5;
+    }
+
+    .card-hint a { color: #8a6f2e; text-decoration: none; }
+
+    .key-row { display: flex; gap: 8px; }
+    .key-row input { flex: 1; }
+
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      height: 36px;
+      padding: 0 10px;
+      border: 0.5px solid #e0ddd6;
+      border-radius: 3px;
+      font-size: 13px;
+      font-family: inherit;
+      color: #1a1814;
+      background: #f7f5f0;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus { border-color: #8a6f2e; }
+
+    .drop-zone {
+      border: 0.5px dashed #d0cdc6;
+      border-radius: 4px;
+      padding: 2.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      margin-bottom: 1.5rem;
+      background: #fff;
+    }
+
+    .drop-zone:hover, .drop-zone.drag-over {
+      background: #faf8f4;
+      border-color: #8a6f2e;
+    }
+
+    .drop-zone input { display: none; }
+
+    .drop-icon {
+      font-size: 22px;
+      margin-bottom: 0.75rem;
+      color: #d0cdc6;
+      display: block;
+    }
+
+    .drop-zone p { font-size: 14px; color: #6a6860; margin: 0; }
+    .drop-zone span { font-size: 12px; color: #b8b5ae; display: block; margin-top: 4px; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: #e0ddd6;
+      border: 0.5px solid #e0ddd6;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 1.25rem;
+    }
+
+    .metric {
+      background: #fff;
+      padding: 1rem;
+      text-align: center;
+    }
+
+    .metric-val {
+      font-family: 'EB Garamond', serif;
+      font-size: 28px;
+      color: #1a1814;
+    }
+
+    .metric-label {
+      font-size: 11px;
+      color: #aaa89e;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .table-wrap {
+      max-height: 240px;
+      overflow-y: auto;
+      border: 0.5px solid #e0ddd6;
+      border-radius: 4px;
+      margin-bottom: 1rem;
+      background: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 0.5px solid #e0ddd6;
+      color: #aaa89e;
+      font-weight: 400;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: #faf8f4;
+      position: sticky;
+      top: 0;
+    }
+
+    td {
+      padding: 7px 12px;
+      border-bottom: 0.5px solid #f0ede8;
+      color: #4a4840;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 2px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+
+    .badge-pending  { background: #faf3e0; color: #8a6f2e; border: 0.5px solid #e8d89a; }
+    .badge-found    { background: #edf7f1; color: #2a7a4a; border: 0.5px solid #b0dcc0; }
+    .badge-review   { background: #fdf0f0; color: #9a3a3a; border: 0.5px solid #e8b8b8; }
+
+    .warning-box {
+      background: #faf3e0;
+      border: 0.5px solid #e8d89a;
+      border-radius: 4px;
+      padding: 0.75rem 1rem;
+      font-size: 13px;
+      color: #8a6f2e;
+      margin-bottom: 1rem;
+    }
+
+    .progress-wrap {
+      background: #e0ddd6;
+      border-radius: 99px;
+      height: 4px;
+      margin: 0.75rem 0;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: #2a7a4a;
+      border-radius: 99px;
+      transition: width 0.3s;
+    }
+
+    .status-text {
+      font-size: 13px;
+      color: #aaa89e;
+      margin-bottom: 1rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .divider { height: 0.5px; background: #e0ddd6; margin: 1.5rem 0; }
+
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    button.primary {
+      background: #2c2820;
+      color: #f7f5f0;
+      border: none;
+      border-radius: 3px;
+      padding: 9px 20px;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button.primary:hover { background: #3c3830; }
+
+    button.secondary {
+      background: transparent;
+      color: #8a8880;
+      border: 0.5px solid #e0ddd6;
+      border-radius: 3px;
+      padding: 9px 20px;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    button.secondary:hover { border-color: #aaa89e; color: #1a1814; }
+
+    button.small {
+      padding: 6px 12px;
+      font-size: 12px;
+      height: 36px;
+    }
+
+    .step { display: none; }
+    .step.active { display: block; }
+
+    footer {
+      margin-top: 2.5rem;
+      font-size: 11px;
+      color: #c8c4bc;
+      text-align: center;
+      letter-spacing: 0.04em;
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">California Inheritance Group</div>
+
+</div>
+
+<div class="page">
+<div class="container">
+
+  <div id="step-upload" class="step active">
+    <header>
+      <div class="eyebrow">Ticker lookup</div>
+      <h1>Security identifier enrichment</h1>
+      <p>Upload a spreadsheet of holdings. Missing or unresolved ticker symbols will be identified automatically using US market data, with OTC symbols preferred over foreign exchange listings.</p>
+    </header>
+
+    <div class="section-label">Gemini API key</div>
+    <div class="card">
+      <div class="card-hint">
+        Used as a fallback when Yahoo Finance can't find a ticker. Free — get one at
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>.
+        Your key stays in your browser and is never sent anywhere except Google.
+      </div>
+      <div class="key-row">
+        <input type="password" id="gemini-key" placeholder="AIza…" />
+        <button class="secondary small" onclick="toggleKey()">Show</button>
+      </div>
+    </div>
+
+    <div class="section-label">Upload file</div>
+    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+      <input type="file" id="file-input" accept=".xlsx,.xls,.csv" onchange="handleFile(this.files[0])" />
+      <span class="drop-icon">↑</span>
+      <p>Drop your spreadsheet here, or click to browse</p>
+      <span>.xlsx · .xls · .csv</span>
+    </div>
+  </div>
+
+  <div id="step-preview" class="step">
+    <header>
+      <div class="eyebrow">Preview</div>
+      <h1>Review before lookup</h1>
+      <p>Confirm the rows below need ticker resolution, then start the lookup.</p>
+    </header>
+
+    <div class="metrics">
+      <div class="metric"><div class="metric-val" id="m-total">0</div><div class="metric-label">Total rows</div></div>
+      <div class="metric"><div class="metric-val" id="m-missing">0</div><div class="metric-label">Need lookup</div></div>
+      <div class="metric"><div class="metric-val" id="m-unique">0</div><div class="metric-label">Unique names</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Security name</th><th>Current ticker</th></tr></thead>
+        <tbody id="preview-body"></tbody>
+      </table>
+    </div>
+
+    <div class="warning-box" id="no-key-warn" style="display:none;">
+      ⚠️ No Gemini key entered — Yahoo Finance and SEC EDGAR will still run, but some rows may remain unresolved.
+    </div>
+
+    <div class="btn-row">
+      <button class="secondary" onclick="goTo('step-upload')">Back</button>
+      <button class="primary" onclick="startLookup()">Start lookup →</button>
+    </div>
+  </div>
+
+  <div id="step-running" class="step">
+    <header>
+      <div class="eyebrow">Running</div>
+      <h1>Looking up tickers…</h1>
+    </header>
+
+    <div class="metrics">
+      <div class="metric"><div class="metric-val" id="r-done">0</div><div class="metric-label">Completed</div></div>
+      <div class="metric"><div class="metric-val" id="r-found">0</div><div class="metric-label">Found</div></div>
+      <div class="metric"><div class="metric-val" id="r-review">0</div><div class="metric-label">Needs review</div></div>
+    </div>
+
+    <div class="progress-wrap"><div class="progress-bar" id="progress-bar" style="width:0%"></div></div>
+    <div class="status-text" id="status-text">Starting…</div>
+
+    <div class="table-wrap" style="max-height: 280px;">
+      <table>
+        <thead><tr><th>Security name</th><th>Result</th><th>Source</th></tr></thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="step-done" class="step">
+    <header>
+      <div class="eyebrow">Complete</div>
+      <h1>Lookup complete</h1>
+      <p>Download the enriched spreadsheet below. Rows marked NEEDS_REVIEW are highlighted in yellow and require manual verification.</p>
+    </header>
+
+    <div class="metrics">
+      <div class="metric"><div class="metric-val" id="d-found">0</div><div class="metric-label">Tickers found</div></div>
+      <div class="metric"><div class="metric-val" id="d-review">0</div><div class="metric-label">Needs review</div></div>
+      <div class="metric"><div class="metric-val" id="d-unchanged">0</div><div class="metric-label">Already complete</div></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="btn-row">
+      <button class="primary" onclick="downloadResult()">⬇ Download enriched spreadsheet</button>
+      <button class="secondary" onclick="startOver()">Start over</button>
+    </div>
+  </div>
+
+  <footer>All processing occurs locally in your browser · No data is transmitted to external servers</footer>
+
+</div>
+</div>
+
+<script>
+  let df = [], ticker_cache = {}, source_cache = {}, geminiKey = '';
+
+  const FOREIGN = new Set(['TSXV','TSX','CVE','LSE','ASX','HKSE','TYO','FRA','AMS','MCX','NSE','BSE','BOM','STO','HEL','OSL','NZX','JSE']);
+  const US_PREF = ['PNK','OTC','PINK','OTCBB','NYSE','NMS','NGM','NCM','BATS','ARCA','NASDAQ'];
+
+  function goTo(id) {
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function toggleKey() {
+    const inp = document.getElementById('gemini-key');
+    const btn = event.target;
+    if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
+    else { inp.type = 'password'; btn.textContent = 'Show'; }
+  }
+
+  const dz = document.getElementById('drop-zone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]); });
+
+  function handleFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const wb = XLSX.read(e.target.result, { type: 'binary' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      df = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      showPreview();
+    };
+    reader.readAsBinaryString(file);
+  }
+
+  function needsLookup(val) {
+    const v = String(val ?? '').trim();
+    return !v || v === '?' || v.toLowerCase() === 'needs_review';
+  }
+
+  function showPreview() {
+    const missing = df.filter(r => needsLookup(r.tickerSymbol));
+    const unique = [...new Set(missing.map(r => r.securityName).filter(Boolean))];
+    document.getElementById('m-total').textContent = df.length;
+    document.getElementById('m-missing').textContent = missing.length;
+    document.getElementById('m-unique').textContent = unique.length;
+    const tbody = document.getElementById('preview-body');
+    tbody.innerHTML = missing.slice(0, 60).map(r =>
+      `<tr><td>${r.securityName ?? ''}</td><td><span class="badge badge-pending">${String(r.tickerSymbol || 'blank')}</span></td></tr>`
+    ).join('');
+    goTo('step-preview');
+  }
+
+  function startLookup() {
+    geminiKey = document.getElementById('gemini-key').value.trim();
+    document.getElementById('no-key-warn').style.display = geminiKey ? 'none' : 'block';
+    ticker_cache = {}; source_cache = {};
+    document.getElementById('results-body').innerHTML = '';
+    goTo('step-running');
+    runLookup();
+  }
+
+  async function runLookup() {
+    const missing = df.filter(r => needsLookup(r.tickerSymbol));
+    const unique = [...new Set(missing.map(r => r.securityName).filter(Boolean))];
+    let done = 0, found = 0, review = 0;
+
+    for (const name of unique) {
+      document.getElementById('status-text').textContent = `Looking up: ${name}`;
+      const [ticker, source] = await lookupTicker(name);
+      ticker_cache[name] = ticker;
+      source_cache[name] = source;
+      done++;
+      if (ticker === 'NEEDS_REVIEW') review++; else found++;
+      document.getElementById('r-done').textContent = done;
+      document.getElementById('r-found').textContent = found;
+      document.getElementById('r-review').textContent = review;
+      document.getElementById('progress-bar').style.width = Math.round(done / unique.length * 100) + '%';
+      const badge = ticker === 'NEEDS_REVIEW' ? 'badge-review' : 'badge-found';
+      document.getElementById('results-body').insertAdjacentHTML('afterbegin',
+        `<tr>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</td>
+          <td><span class="badge ${badge}">${ticker}</span></td>
+          <td style="color:#888;font-size:12px;">${source}</td>
+        </tr>`);
+      await sleep(200);
+    }
+
+    document.getElementById('status-text').textContent = '✓ All done!';
+    document.getElementById('d-found').textContent = found;
+    document.getElementById('d-review').textContent = review;
+    document.getElementById('d-unchanged').textContent = df.filter(r => !needsLookup(r.tickerSymbol)).length;
+    goTo('step-done');
+  }
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  async function lookupTicker(name) {
+    const r1 = await tryYahoo(name);
+    if (r1) return [r1, 'Yahoo Finance'];
+    if (geminiKey) {
+      const r2 = await tryGemini(name);
+      if (r2) return [r2, 'Gemini AI'];
+    }
+    return ['NEEDS_REVIEW', '—'];
+  }
+
+  async function tryYahoo(name) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(name)}&quotesCount=10&newsCount=0`;
+      const r = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+      if (!r.ok) return null;
+      const data = await r.json();
+      const quotes = (data.quotes || []).filter(q => {
+        const ex = (q.exchange || '').toUpperCase();
+        return !FOREIGN.has(ex) && q.symbol;
+      });
+      if (!quotes.length) return null;
+      quotes.sort((a, b) => {
+        const rank = s => { const i = US_PREF.findIndex(p => (s||'').toUpperCase().includes(p)); return i === -1 ? 99 : i; };
+        return rank(a.exchange) - rank(b.exchange);
+      });
+      return quotes[0].symbol;
+    } catch { return null; }
+  }
+
+  async function tryGemini(name) {
+    try {
+      const prompt = `What is the US stock ticker symbol for: "${name}"? Prefer OTC/Pink Sheets over NYSE/NASDAQ. Ignore all foreign exchange listings (TSX, LSE, ASX, etc). If it's a mutual fund return the fund ticker. If unknown or only foreign-listed, return NOT_FOUND. Reply with ONLY the ticker or NOT_FOUND.`;
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
+      if (!text || text === 'NOT_FOUND') return null;
+      const match = text.match(/\b([A-Z]{1,6})\b/);
+      return match ? match[1] : null;
+    } catch { return null; }
+  }
+
+  function downloadResult() {
+    const enriched = df.map(row => {
+      if (needsLookup(row.tickerSymbol) && ticker_cache[row.securityName]) {
+        return { ...row, tickerSymbol: ticker_cache[row.securityName] };
+      }
+      return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(enriched);
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const headers = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
+      headers.push(cell ? cell.v : '');
+    }
+    const tcol = headers.indexOf('tickerSymbol');
+    if (tcol >= 0) {
+      for (let rw = 1; rw <= range.e.r; rw++) {
+        const addr = XLSX.utils.encode_cell({ r: rw, c: tcol });
+        if (ws[addr] && ws[addr].v === 'NEEDS_REVIEW') {
+          if (!ws[addr].s) ws[addr].s = {};
+          ws[addr].s.fill = { fgColor: { rgb: 'FFFF00' } };
+        }
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    XLSX.writeFile(wb, 'Ticker_Enriched.xlsx');
+  }
+
+  function startOver() {
+    df = []; ticker_cache = {}; source_cache = {};
+    document.getElementById('file-input').value = '';
+    document.getElementById('gemini-key').value = '';
+    goTo('step-upload');
+  }
+</script>
+</body>
+</html>

@@ -28,7 +28,6 @@ const QUOTE_TYPE_SCORE = {
 };
 
 const GEMINI_MODELS = [
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
   { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' }
 ];
@@ -86,7 +85,7 @@ function buildSearchQueries(name) {
   const base = removeClassMarkers(stripped);
 
   return [...new Set(
-    [original, titleCase(standardized), titleCase(stripped), titleCase(base)]
+    [base, stripped, standardized, original]
       .map(normalizeWhitespace)
       .filter(Boolean)
   )];
@@ -339,15 +338,18 @@ function parseGeminiTicker(rawText) {
 
 async function tryGemini(name, apiKey) {
   const queries = buildSearchQueries(name);
-  const cleaned = queries[queries.length - 1] || name;
+  const cleaned = queries[0] || name;
   const prompt = [
     'Identify the best US-traded ticker symbol for this security name.',
     `Original security name: "${normalizeWhitespace(name)}"`,
     `Cleaned security name: "${cleaned}"`,
     'Rules:',
-    '- Prefer a US OTC/Pink Sheets ticker when that is the only US-traded listing.',
-    '- Otherwise return the primary US-listed stock, ETF, or mutual fund ticker.',
-    '- Ignore foreign-only listings and reject crypto or currency symbols.',
+    '- If there is both a foreign listing and a US OTC ticker, always return the OTC ticker.',
+    '- Never return a foreign exchange symbol.',
+    '- Prefer a US OTC/Pink Sheets ticker over TSX, TSXV, LSE, ASX, HKEX, and any other non-US exchange.',
+    '- Otherwise return the best US-listed stock, ETF, or mutual fund ticker.',
+    '- Reject crypto symbols, currency pairs, and foreign suffixes like .TO or .V.',
+    '- Example: Arras Minerals Corp -> ARRKF, not ARK.',
     '- If no US-traded ticker exists, return NOT_FOUND.',
     'Respond with JSON only in this exact shape:',
     '{"ticker":"AAPL"}',
@@ -399,11 +401,6 @@ export default async function handler(req, res) {
   const { name } = req.body || {};
   if (!name) {
     return res.status(400).json({ error: 'Missing name' });
-  }
-
-  const yahoo = await tryYahoo(name);
-  if (yahoo) {
-    return res.status(200).json({ ticker: yahoo, source: 'Yahoo Finance' });
   }
 
   const sec = await trySec(name);

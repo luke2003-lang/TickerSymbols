@@ -65,6 +65,7 @@ function stripDescriptors(name) {
     .replace(/\b(PAR VALUE|REGISTERED|REGD|NEW|OLD)\b/g, ' ')
     .replace(/\b(ADR|ADS|SPON ADR|SPONSORED ADR|DEPOSITARY SHARES?)\b/g, ' ')
     .replace(/\b(PREF|PREFERRED|PREFERENCE)\b/g, ' ')
+    .replace(/\b(TRUST|FUND|FUNDS|ETF|ETFS|PORTFOLIO|PORTFOLIOS)\b/g, ' ')
     .replace(/\b(COMMON STOCK|CAPITAL STOCK|COMMON|CAPITAL|COM|STOCK)\b/g, ' ')
     .replace(/\b(ORDINARY SHARES?|ORD SHS?|SHARES?|SHS?)\b/g, ' ')
     .replace(/\b(UNITS?|UTS|RIGHTS?|RTS|WARRANTS?|WTS)\b/g, ' ')

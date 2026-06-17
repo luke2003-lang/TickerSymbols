@@ -29,7 +29,7 @@ const QUOTE_TYPE_SCORE = {
 
 const GEMINI_MODELS = [
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' }
+  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite' }
 ];
 
 const FUND_FAMILY_HINTS = [
@@ -216,6 +216,8 @@ async function fetchJson(url, options = {}, timeoutMs = 8000) {
   }
 }
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function tryYahoo(name) {
   let bestMatch = null;
 
@@ -303,35 +305,45 @@ async function tryGemini(name, apiKey) {
   ].join('\n');
 
   for (const model of GEMINI_MODELS) {
-    try {
-      const response = await fetchJson(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1
-            }
-          })
-        },
-        12000
-      );
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetchJson(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                temperature: 0.1
+              }
+            })
+          },
+          12000
+        );
 
-      if (!response.ok) {
-        console.error('Gemini lookup failed', { model: model.id, status: response.status });
-        continue;
-      }
+        if (response.status === 429) {
+          console.error('Gemini lookup failed', { model: model.id, status: response.status, attempt: attempt + 1 });
+          await sleep(400 * (attempt + 1));
+          continue;
+        }
 
-      const data = await response.json();
-      const ticker = parseGeminiTicker(extractGeminiText(data));
-      if (ticker) {
-        return { ticker, source: model.label };
+        if (!response.ok) {
+          console.error('Gemini lookup failed', { model: model.id, status: response.status });
+          break;
+        }
+
+        const data = await response.json();
+        const ticker = parseGeminiTicker(extractGeminiText(data));
+        if (ticker) {
+          return { ticker, source: model.label };
+        }
+        break;
+      } catch (error) {
+        console.error('Gemini lookup failed', { model: model.id, error: error?.message, attempt: attempt + 1 });
+        await sleep(250 * (attempt + 1));
       }
-    } catch (error) {
-      console.error('Gemini lookup failed', { model: model.id, error: error?.message });
     }
   }
 

@@ -27,6 +27,14 @@ const QUOTE_TYPE_SCORE = {
   MUTUALFUND: 36
 };
 
+const GEMINI_MODELS = [
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' }
+];
+
+let secTickerIndexPromise = null;
+
 function normalizeWhitespace(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -78,6 +86,18 @@ function buildSearchQueries(name) {
 
   return [...new Set(
     [original, titleCase(standardized), titleCase(stripped), titleCase(base)]
+      .map(normalizeWhitespace)
+      .filter(Boolean)
+  )];
+}
+
+function buildSecNameVariants(name) {
+  const standardized = standardizeName(name);
+  const stripped = stripDescriptors(standardized);
+  const base = removeClassMarkers(stripped);
+
+  return [...new Set(
+    [standardized, stripped, base]
       .map(normalizeWhitespace)
       .filter(Boolean)
   )];
@@ -227,6 +247,64 @@ async function tryYahoo(name) {
   return bestMatch && bestMatch.score >= 45 ? bestMatch.ticker : null;
 }
 
+async function getSecTickerIndex() {
+  if (!secTickerIndexPromise) {
+    secTickerIndexPromise = (async () => {
+      const response = await fetchJson('https://www.sec.gov/files/company_tickers.json', {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'TickerSymbols/1.0 https://github.com/luke2003-lang/TickerSymbols'
+        }
+      }, 12000);
+
+      if (!response.ok) {
+        throw new Error(`SEC lookup failed with status ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const exactMatches = new Map();
+
+      for (const record of Object.values(payload || {})) {
+        const ticker = sanitizeTicker(String(record?.ticker || '').replace(/\./g, '-'));
+        const title = record?.title;
+        if (!ticker || !title) {
+          continue;
+        }
+
+        for (const variant of buildSecNameVariants(title)) {
+          if (!exactMatches.has(variant)) {
+            exactMatches.set(variant, ticker);
+          }
+        }
+      }
+
+      return exactMatches;
+    })().catch(error => {
+      secTickerIndexPromise = null;
+      console.error('SEC lookup failed', { error: error?.message });
+      return null;
+    });
+  }
+
+  return secTickerIndexPromise;
+}
+
+async function trySec(name) {
+  const index = await getSecTickerIndex();
+  if (!index) {
+    return null;
+  }
+
+  for (const variant of buildSecNameVariants(name)) {
+    const ticker = index.get(variant);
+    if (ticker) {
+      return ticker;
+    }
+  }
+
+  return null;
+}
+
 function extractGeminiText(payload) {
   const parts = payload?.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) {
@@ -276,34 +354,40 @@ async function tryGemini(name, apiKey) {
     '{"ticker":"NOT_FOUND"}'
   ].join('\n');
 
-  try {
-    const response = await fetchJson(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.1
-          }
-        })
-      },
-      12000
-    );
+  for (const model of GEMINI_MODELS) {
+    try {
+      const response = await fetchJson(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.1
+            }
+          })
+        },
+        12000
+      );
 
-    if (!response.ok) {
-      console.error('Gemini lookup failed', { status: response.status });
-      return null;
+      if (!response.ok) {
+        console.error('Gemini lookup failed', { model: model.id, status: response.status });
+        continue;
+      }
+
+      const data = await response.json();
+      const ticker = parseGeminiTicker(extractGeminiText(data));
+      if (ticker) {
+        return { ticker, source: model.label };
+      }
+    } catch (error) {
+      console.error('Gemini lookup failed', { model: model.id, error: error?.message });
     }
-
-    const data = await response.json();
-    return parseGeminiTicker(extractGeminiText(data));
-  } catch (error) {
-    console.error('Gemini lookup failed', { error: error?.message });
-    return null;
   }
+
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -321,11 +405,16 @@ export default async function handler(req, res) {
     return res.status(200).json({ ticker: yahoo, source: 'Yahoo Finance' });
   }
 
+  const sec = await trySec(name);
+  if (sec) {
+    return res.status(200).json({ ticker: sec, source: 'SEC Company Tickers' });
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (apiKey) {
     const gemini = await tryGemini(name, apiKey);
     if (gemini) {
-      return res.status(200).json({ ticker: gemini, source: 'Gemini AI' });
+      return res.status(200).json(gemini);
     }
   } else {
     console.error('Missing GEMINI_API_KEY');

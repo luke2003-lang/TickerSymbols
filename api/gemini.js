@@ -32,6 +32,13 @@ const GEMINI_MODELS = [
   { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' }
 ];
 
+const FUND_FAMILY_HINTS = [
+  'AMERICAN CENTY', 'BLACKROCK', 'BNY MELLON', 'CHARLES SCHWAB', 'COLUMBIA',
+  'DFA', 'DOUBLELINE', 'FMI', 'FPA', 'FRANKLIN', 'GLOBAL X', 'GRANDEUR PEAK',
+  'INVESCO', 'ISHARES', 'NUVEEN', 'PROSHARES', 'SCHWAB', 'SPDR', 'USAA',
+  'VANGUARD', 'VICTORY', 'WASATCH'
+];
+
 let secTickerIndexPromise = null;
 
 function normalizeWhitespace(value) {
@@ -101,6 +108,16 @@ function buildSecNameVariants(name) {
       .map(normalizeWhitespace)
       .filter(Boolean)
   )];
+}
+
+function isFundLikeName(name) {
+  const upper = standardizeName(name);
+
+  if (FUND_FAMILY_HINTS.some(hint => upper.startsWith(hint))) {
+    return true;
+  }
+
+  return /\b(ETF|ETFS|FUND|FUNDS|FDS|INDEX|INCOME|BOND|DIVIDEND|TR|TRUST|TARGET|VALUE|GROWTH|REAL ESTATE)\b/.test(upper);
 }
 
 function tokenize(value) {
@@ -416,6 +433,13 @@ export default async function handler(req, res) {
     }
   } else {
     console.error('Missing GEMINI_API_KEY');
+  }
+
+  if (isFundLikeName(name)) {
+    const yahoo = await tryYahoo(name);
+    if (yahoo) {
+      return res.status(200).json({ ticker: yahoo, source: 'Yahoo Finance' });
+    }
   }
 
   return res.status(200).json({ ticker: 'NEEDS_REVIEW', source: '—' });

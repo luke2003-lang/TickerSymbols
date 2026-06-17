@@ -1,48 +1,309 @@
-const FOREIGN = new Set(['TSXV','TSX','CVE','LSE','ASX','HKSE','TYO','FRA','AMS','MCX','NSE','BSE','BOM','STO','HEL','OSL','NZX','JSE']);
-const US_PREF = ['PNK','OTC','PINK','OTCBB','NYSE','NMS','NGM','NCM','BATS','ARCA','NASDAQ'];
+const FOREIGN_EXCHANGES = new Set([
+  'ASX', 'BME', 'BOM', 'BSE', 'CVE', 'FRA', 'HEL', 'HKSE', 'JSE', 'LSE',
+  'MCX', 'MEX', 'NSE', 'NZX', 'OSL', 'PAR', 'STO', 'SWX', 'TSX', 'TSXV', 'TYO'
+]);
 
-function otcRank(exchange) {
-  const ex = (exchange || '').toUpperCase();
-  const i = US_PREF.findIndex(p => ex.includes(p));
-  return i === -1 ? 99 : i;
+const FOREIGN_SYMBOL_SUFFIXES = [
+  '.AS', '.AT', '.AX', '.BK', '.BO', '.BR', '.CO', '.DE', '.F', '.HE', '.HK',
+  '.IC', '.JK', '.JO', '.KS', '.KQ', '.L', '.MC', '.MI', '.MX', '.NS', '.NZ',
+  '.OL', '.PA', '.SI', '.SS', '.ST', '.SW', '.SZ', '.T', '.TO', '.TW', '.V'
+];
+
+const US_EXCHANGE_HINTS = [
+  'AMEX', 'ARCA', 'BATS', 'NASDAQ', 'NAS', 'NCM', 'NGM', 'NMS', 'NYSE', 'NYQ',
+  'OQB', 'OQX', 'OTC', 'OTCBB', 'OTCMKTS', 'PINK', 'PNK'
+];
+
+const BAD_QUOTE_TYPES = new Set(['ALTSYMBOL', 'CRYPTOCURRENCY', 'CURRENCY', 'FUTURE', 'INDEX']);
+const STOPWORDS = new Set([
+  'AND', 'CAPITAL', 'CLASS', 'CO', 'COMMON', 'CORP', 'CORPORATION', 'FUND',
+  'HOLDINGS', 'INC', 'INCORPORATED', 'LIMITED', 'PLC', 'SHARES', 'STOCK',
+  'THE', 'TRUST'
+]);
+
+const QUOTE_TYPE_SCORE = {
+  EQUITY: 40,
+  ETF: 38,
+  MUTUALFUND: 36
+};
+
+function normalizeWhitespace(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function titleCase(value) {
+  return value
+    .toLowerCase()
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function standardizeName(name) {
+  return normalizeWhitespace(String(name || ''))
+    .toUpperCase()
+    .replace(/&/g, ' AND ')
+    .replace(/\bINTL\b/g, 'INTERNATIONAL')
+    .replace(/\bTECH\b/g, 'TECHNOLOGY')
+    .replace(/\bSVCS\b/g, 'SERVICES')
+    .replace(/\bCAP STK\b/g, 'CAPITAL STOCK')
+    .replace(/\bCOM STK\b/g, 'COMMON STOCK')
+    .replace(/\bCL\s+([A-Z0-9]+)\b/g, 'CLASS $1')
+    .replace(/[(),/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripDescriptors(name) {
+  return normalizeWhitespace(name
+    .replace(/\b(PAR VALUE|REGISTERED|REGD|NEW|OLD)\b/g, ' ')
+    .replace(/\b(ADR|ADS|SPON ADR|SPONSORED ADR|DEPOSITARY SHARES?)\b/g, ' ')
+    .replace(/\b(PREF|PREFERRED|PREFERENCE)\b/g, ' ')
+    .replace(/\b(COMMON STOCK|CAPITAL STOCK|COMMON|CAPITAL|COM|STOCK)\b/g, ' ')
+    .replace(/\b(ORDINARY SHARES?|ORD SHS?|SHARES?|SHS?)\b/g, ' ')
+    .replace(/\b(UNITS?|UTS|RIGHTS?|RTS|WARRANTS?|WTS)\b/g, ' ')
+    .replace(/\s+/g, ' '));
+}
+
+function removeClassMarkers(name) {
+  return normalizeWhitespace(name
+    .replace(/\bCLASS\s+[A-Z0-9]+\b/g, ' ')
+    .replace(/\bSERIES\s+[A-Z0-9]+\b/g, ' ')
+    .replace(/\s+/g, ' '));
+}
+
+function buildSearchQueries(name) {
+  const original = normalizeWhitespace(name);
+  const standardized = standardizeName(name);
+  const stripped = stripDescriptors(standardized);
+  const base = removeClassMarkers(stripped);
+
+  return [...new Set(
+    [original, titleCase(standardized), titleCase(stripped), titleCase(base)]
+      .map(normalizeWhitespace)
+      .filter(Boolean)
+  )];
+}
+
+function tokenize(value) {
+  return normalizeWhitespace(String(value || ''))
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .split(' ')
+    .filter(token => token && !STOPWORDS.has(token));
+}
+
+function overlapScore(query, candidate) {
+  const queryTokens = tokenize(query);
+  const candidateTokens = tokenize(candidate);
+
+  if (!queryTokens.length || !candidateTokens.length) {
+    return 0;
+  }
+
+  const candidateSet = new Set(candidateTokens);
+  const matched = queryTokens.filter(token => candidateSet.has(token)).length;
+  const coverage = matched / queryTokens.length;
+  return Math.round(coverage * 30);
+}
+
+function isForeignSymbol(symbol) {
+  const upper = String(symbol || '').toUpperCase();
+  return FOREIGN_SYMBOL_SUFFIXES.some(suffix => upper.endsWith(suffix));
+}
+
+function isUsExchange(exchange) {
+  const upper = String(exchange || '').toUpperCase();
+  return US_EXCHANGE_HINTS.some(hint => upper.includes(hint));
+}
+
+function sanitizeTicker(rawTicker) {
+  const upper = normalizeWhitespace(String(rawTicker || ''))
+    .toUpperCase()
+    .replace(/^:+|:+$/g, '')
+    .replace(/[)\],.;:]+$/g, '');
+
+  if (!upper || upper === 'NOT_FOUND' || BAD_QUOTE_TYPES.has(upper)) {
+    return null;
+  }
+
+  if (upper.endsWith('-USD') || upper.includes(' ')) {
+    return null;
+  }
+
+  if (isForeignSymbol(upper)) {
+    return null;
+  }
+
+  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(upper) ? upper : null;
+}
+
+function scoreQuote(quote, query) {
+  const symbol = sanitizeTicker(quote?.symbol);
+  const exchange = String(quote?.exchange || '').toUpperCase();
+  const quoteType = String(quote?.quoteType || '').toUpperCase();
+
+  if (!symbol || BAD_QUOTE_TYPES.has(quoteType)) {
+    return -Infinity;
+  }
+
+  if (FOREIGN_EXCHANGES.has(exchange) && !isUsExchange(exchange)) {
+    return -Infinity;
+  }
+
+  let score = QUOTE_TYPE_SCORE[quoteType] ?? 8;
+
+  if (isUsExchange(exchange)) {
+    score += 18;
+  }
+
+  if (exchange.includes('OTC') || exchange.includes('PNK') || exchange.includes('PINK')) {
+    score += 8;
+  }
+
+  score += overlapScore(query, quote?.shortname || '');
+  score += overlapScore(query, quote?.longname || '');
+  score += overlapScore(query, quote?.displayName || '');
+
+  const standardizedQuery = standardizeName(query);
+  const longName = standardizeName(quote?.longname || quote?.shortname || quote?.displayName || '');
+
+  if (longName && (longName.includes(standardizedQuery) || standardizedQuery.includes(longName))) {
+    score += 12;
+  }
+
+  if (/CLASS [A-Z0-9]+/.test(standardizedQuery) && !/CLASS [A-Z0-9]+/.test(longName)) {
+    score -= 4;
+  }
+
+  return score;
+}
+
+async function fetchJson(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function tryYahoo(name) {
+  let bestMatch = null;
+
+  for (const query of buildSearchQueries(name)) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=12&newsCount=0`;
+      const response = await fetchJson(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = await response.json();
+      const quotes = Array.isArray(data?.quotes) ? data.quotes : [];
+
+      for (const quote of quotes) {
+        const score = scoreQuote(quote, query);
+        if (score > (bestMatch?.score ?? -Infinity)) {
+          bestMatch = {
+            score,
+            ticker: sanitizeTicker(quote.symbol)
+          };
+        }
+      }
+    } catch (error) {
+      console.error('Yahoo lookup failed', { query, error: error?.message });
+    }
+  }
+
+  return bestMatch && bestMatch.score >= 45 ? bestMatch.ticker : null;
+}
+
+function extractGeminiText(payload) {
+  const parts = payload?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) {
+    return '';
+  }
+
+  return parts
+    .map(part => typeof part?.text === 'string' ? part.text : '')
+    .join('')
+    .trim();
+}
+
+function parseGeminiTicker(rawText) {
+  if (!rawText) {
+    return null;
+  }
+
   try {
-    const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(name)}&quotesCount=10&newsCount=0`;
-    const r = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    });
-    if (!r.ok) return null;
-    const data = await r.json();
-    const quotes = (data.quotes || []).filter(q => {
-      const ex = (q.exchange || '').toUpperCase();
-      return !FOREIGN.has(ex) && q.symbol;
-    });
-    if (!quotes.length) return null;
-    quotes.sort((a, b) => otcRank(a.exchange) - otcRank(b.exchange));
-    return quotes[0].symbol;
-  } catch { return null; }
+    const parsed = JSON.parse(rawText);
+    return sanitizeTicker(parsed?.ticker);
+  } catch {
+    const jsonMatch = rawText.match(/"ticker"\s*:\s*"([^"]+)"/i);
+    if (jsonMatch) {
+      return sanitizeTicker(jsonMatch[1]);
+    }
+
+    const textMatch = rawText.toUpperCase().match(/\b[A-Z][A-Z0-9.-]{0,9}\b/);
+    return sanitizeTicker(textMatch ? textMatch[0] : '');
+  }
 }
 
 async function tryGemini(name, apiKey) {
+  const queries = buildSearchQueries(name);
+  const cleaned = queries[queries.length - 1] || name;
+  const prompt = [
+    'Identify the best US-traded ticker symbol for this security name.',
+    `Original security name: "${normalizeWhitespace(name)}"`,
+    `Cleaned security name: "${cleaned}"`,
+    'Rules:',
+    '- Prefer a US OTC/Pink Sheets ticker when that is the only US-traded listing.',
+    '- Otherwise return the primary US-listed stock, ETF, or mutual fund ticker.',
+    '- Ignore foreign-only listings and reject crypto or currency symbols.',
+    '- If no US-traded ticker exists, return NOT_FOUND.',
+    'Respond with JSON only in this exact shape:',
+    '{"ticker":"AAPL"}',
+    'If unknown, respond with:',
+    '{"ticker":"NOT_FOUND"}'
+  ].join('\n');
+
   try {
-    const prompt = `What is the US stock ticker symbol for: "${name}"? Prefer OTC/Pink Sheets over NYSE/NASDAQ. Ignore all foreign exchange listings (TSX, LSE, ASX, etc). If it's a mutual fund return the fund ticker. If unknown or only foreign-listed, return NOT_FOUND. Reply with ONLY the ticker or NOT_FOUND.`;
-    const r = await fetch(
+    const response = await fetchJson(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-      }
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1
+          }
+        })
+      },
+      12000
     );
-    if (!r.ok) return null;
-    const data = await r.json();
-    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
-    if (!text || text === 'NOT_FOUND') return null;
-    const match = text.match(/\b([A-Z]{1,6})\b/);
-    return match ? match[1] : null;
-  } catch { return null; }
+
+    if (!response.ok) {
+      console.error('Gemini lookup failed', { status: response.status });
+      return null;
+    }
+
+    const data = await response.json();
+    return parseGeminiTicker(extractGeminiText(data));
+  } catch (error) {
+    console.error('Gemini lookup failed', { error: error?.message });
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
@@ -50,24 +311,24 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { name } = req.body;
+  const { name } = req.body || {};
   if (!name) {
     return res.status(400).json({ error: 'Missing name' });
   }
 
-  // Try Yahoo Finance first (no key needed)
   const yahoo = await tryYahoo(name);
   if (yahoo) {
     return res.status(200).json({ ticker: yahoo, source: 'Yahoo Finance' });
   }
 
-  // Fall back to Gemini
   const apiKey = process.env.GEMINI_API_KEY;
   if (apiKey) {
     const gemini = await tryGemini(name, apiKey);
     if (gemini) {
       return res.status(200).json({ ticker: gemini, source: 'Gemini AI' });
     }
+  } else {
+    console.error('Missing GEMINI_API_KEY');
   }
 
   return res.status(200).json({ ticker: 'NEEDS_REVIEW', source: '—' });

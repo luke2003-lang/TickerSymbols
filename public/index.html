@@ -422,9 +422,6 @@
 <script>
   let df = [], ticker_cache = {}, source_cache = {};
 
-  const FOREIGN = new Set(['TSXV','TSX','CVE','LSE','ASX','HKSE','TYO','FRA','AMS','MCX','NSE','BSE','BOM','STO','HEL','OSL','NZX','JSE']);
-  const US_PREF = ['PNK','OTC','PINK','OTCBB','NYSE','NMS','NGM','NCM','BATS','ARCA','NASDAQ'];
-
   function goTo(id) {
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
@@ -509,47 +506,18 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   async function lookupTicker(name) {
-    const r1 = await tryYahoo(name);
-    if (r1) return [r1, 'Yahoo Finance'];
-    const r2 = await tryGemini(name);
-    if (r2) return [r2, 'Gemini AI'];
-    return ['NEEDS_REVIEW', '—'];
-  }
-
-  async function tryYahoo(name) {
     try {
-      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(name)}&quotesCount=10&newsCount=0`;
-      const r = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-      if (!r.ok) return null;
-      const data = await r.json();
-      const quotes = (data.quotes || []).filter(q => {
-        const ex = (q.exchange || '').toUpperCase();
-        return !FOREIGN.has(ex) && q.symbol;
-      });
-      if (!quotes.length) return null;
-      quotes.sort((a, b) => {
-        const rank = s => { const i = US_PREF.findIndex(p => (s||'').toUpperCase().includes(p)); return i === -1 ? 99 : i; };
-        return rank(a.exchange) - rank(b.exchange);
-      });
-      return quotes[0].symbol;
-    } catch { return null; }
-  }
-
-  async function tryGemini(name) {
-    try {
-      const prompt = `What is the US stock ticker symbol for: "${name}"? Prefer OTC/Pink Sheets over NYSE/NASDAQ. Ignore all foreign exchange listings (TSX, LSE, ASX, etc). If it's a mutual fund return the fund ticker. If unknown or only foreign-listed, return NOT_FOUND. Reply with ONLY the ticker or NOT_FOUND.`;
       const r = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ name })
       });
-      if (!r.ok) return null;
+      if (!r.ok) return ['NEEDS_REVIEW', '—'];
       const data = await r.json();
-      const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
-      if (!text || text === 'NOT_FOUND') return null;
-      const match = text.match(/\b([A-Z]{1,6})\b/);
-      return match ? match[1] : null;
-    } catch { return null; }
+      return [data.ticker || 'NEEDS_REVIEW', data.source || '—'];
+    } catch {
+      return ['NEEDS_REVIEW', '—'];
+    }
   }
 
   function downloadResult() {

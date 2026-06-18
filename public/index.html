@@ -421,7 +421,8 @@
 
 <script>
   let df = [], ticker_cache = {}, source_cache = {};
-  const LOOKUP_BATCH_SIZE = 12;
+  const LOOKUP_BATCH_SIZE = 30;
+  const LOOKUP_BATCH_PAUSE_MS = 2500;
 
   function goTo(id) {
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
@@ -504,7 +505,7 @@
         const [ticker, source] = batchResults.get(name) || ['NEEDS_REVIEW', '—'];
         updateProgress(name, ticker, source);
       }
-      await sleep(250);
+      await sleep(LOOKUP_BATCH_PAUSE_MS);
     }
 
     document.getElementById('status-text').textContent = '✓ All done!';

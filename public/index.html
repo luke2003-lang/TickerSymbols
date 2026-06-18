@@ -421,7 +421,7 @@
 
 <script>
   let df = [], ticker_cache = {}, source_cache = {};
-  const LOOKUP_CONCURRENCY = 3;
+  const LOOKUP_BATCH_SIZE = 12;
 
   function goTo(id) {
     document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
@@ -475,7 +475,6 @@
     const missing = df.filter(r => needsLookup(r.tickerSymbol));
     const unique = [...new Set(missing.map(r => r.securityName).filter(Boolean))];
     let done = 0, found = 0, review = 0;
-    let nextIndex = 0;
 
     const updateProgress = (name, ticker, source) => {
       ticker_cache[name] = ticker;
@@ -496,19 +495,17 @@
         </tr>`);
     };
 
-    const worker = async () => {
-      while (nextIndex < unique.length) {
-        const current = nextIndex++;
-        const name = unique[current];
-        const [ticker, source] = await lookupTicker(name);
-        updateProgress(name, ticker, source);
-        await sleep(75);
-      }
-    };
+    for (let i = 0; i < unique.length; i += LOOKUP_BATCH_SIZE) {
+      const batch = unique.slice(i, i + LOOKUP_BATCH_SIZE);
+      document.getElementById('status-text').textContent = `Processing ${Math.min(i + 1, unique.length)}-${Math.min(i + batch.length, unique.length)} of ${unique.length}`;
+      const batchResults = await lookupTickerBatch(batch);
 
-    await Promise.all(
-      Array.from({ length: Math.min(LOOKUP_CONCURRENCY, unique.length) }, () => worker())
-    );
+      for (const name of batch) {
+        const [ticker, source] = batchResults.get(name) || ['NEEDS_REVIEW', '—'];
+        updateProgress(name, ticker, source);
+      }
+      await sleep(250);
+    }
 
     document.getElementById('status-text').textContent = '✓ All done!';
     document.getElementById('d-found').textContent = found;
@@ -531,6 +528,26 @@
       return [data.ticker || 'NEEDS_REVIEW', data.source || '—'];
     } catch {
       return ['NEEDS_REVIEW', '—'];
+    }
+  }
+
+  async function lookupTickerBatch(names) {
+    try {
+      const r = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ names })
+      });
+      if (!r.ok) return new Map(names.map(name => [name, ['NEEDS_REVIEW', '—']]));
+      const data = await r.json();
+      const results = new Map();
+      for (const name of names) {
+        const match = data.results?.[name];
+        results.set(name, [match?.ticker || 'NEEDS_REVIEW', match?.source || '—']);
+      }
+      return results;
+    } catch {
+      return new Map(names.map(name => [name, ['NEEDS_REVIEW', '—']]));
     }
   }
 

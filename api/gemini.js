@@ -283,13 +283,20 @@ function parseGeminiTicker(rawText) {
   }
 }
 
-async function tryGemini(name, apiKey) {
-  const queries = buildSearchQueries(name);
-  const cleaned = queries[0] || name;
-  const prompt = [
-    'Identify the best US-traded ticker symbol for this security name.',
-    `Original security name: "${normalizeWhitespace(name)}"`,
-    `Cleaned security name: "${cleaned}"`,
+function normalizeResultName(value) {
+  return normalizeWhitespace(String(value || ''))
+    .toUpperCase()
+    .replace(/\s+/g, ' ');
+}
+
+function buildGeminiBatchPrompt(names) {
+  const entries = names.map((name, index) => {
+    const cleaned = buildSearchQueries(name)[0] || name;
+    return `${index + 1}. Original: "${normalizeWhitespace(name)}" | Cleaned: "${cleaned}"`;
+  }).join('\n');
+
+  return [
+    'Identify the best US-traded ticker symbol for each security name.',
     'Rules:',
     '- If there is both a foreign listing and a US OTC ticker, always return the OTC ticker.',
     '- Never return a foreign exchange symbol.',
@@ -298,11 +305,41 @@ async function tryGemini(name, apiKey) {
     '- Reject crypto symbols, currency pairs, and foreign suffixes like .TO or .V.',
     '- Example: Arras Minerals Corp -> ARRKF, not ARK.',
     '- If no US-traded ticker exists, return NOT_FOUND.',
-    'Respond with JSON only in this exact shape:',
-    '{"ticker":"AAPL"}',
-    'If unknown, respond with:',
-    '{"ticker":"NOT_FOUND"}'
+    'Return JSON only in this exact shape:',
+    '{"results":[{"name":"Apple Inc","ticker":"AAPL"}]}',
+    'Use each original name exactly as provided in the "name" field.',
+    'Security names:',
+    entries
   ].join('\n');
+}
+
+function parseGeminiBatchResults(rawText, names) {
+  const results = new Map(names.map(name => [name, null]));
+  if (!rawText) {
+    return results;
+  }
+
+  try {
+    const parsed = JSON.parse(rawText);
+    const items = Array.isArray(parsed?.results) ? parsed.results : [];
+    const byNormalized = new Map(names.map(name => [normalizeResultName(name), name]));
+
+    for (const item of items) {
+      const original = byNormalized.get(normalizeResultName(item?.name));
+      if (!original) {
+        continue;
+      }
+      results.set(original, sanitizeTicker(item?.ticker));
+    }
+  } catch (error) {
+    console.error('Gemini batch parse failed', { error: error?.message });
+  }
+
+  return results;
+}
+
+async function tryGeminiBatch(names, apiKey) {
+  const prompt = buildGeminiBatchPrompt(names);
 
   for (const model of GEMINI_MODELS) {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -320,12 +357,12 @@ async function tryGemini(name, apiKey) {
               }
             })
           },
-          12000
+          18000
         );
 
         if (response.status === 429) {
           console.error('Gemini lookup failed', { model: model.id, status: response.status, attempt: attempt + 1 });
-          await sleep(400 * (attempt + 1));
+          await sleep(900 * (attempt + 1));
           continue;
         }
 
@@ -335,14 +372,11 @@ async function tryGemini(name, apiKey) {
         }
 
         const data = await response.json();
-        const ticker = parseGeminiTicker(extractGeminiText(data));
-        if (ticker) {
-          return { ticker, source: model.label };
-        }
-        break;
+        const results = parseGeminiBatchResults(extractGeminiText(data), names);
+        return { results, source: model.label };
       } catch (error) {
         console.error('Gemini lookup failed', { model: model.id, error: error?.message, attempt: attempt + 1 });
-        await sleep(250 * (attempt + 1));
+        await sleep(500 * (attempt + 1));
       }
     }
   }
@@ -350,32 +384,94 @@ async function tryGemini(name, apiKey) {
   return null;
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const { name } = req.body || {};
-  if (!name) {
-    return res.status(400).json({ error: 'Missing name' });
-  }
-
-  const apiKey = process.env.GEMINI_API_KEY;
+async function resolveName(name, apiKey) {
   if (apiKey) {
-    const gemini = await tryGemini(name, apiKey);
-    if (gemini) {
-      return res.status(200).json(gemini);
+    const gemini = await tryGeminiBatch([name], apiKey);
+    const ticker = gemini?.results?.get(name);
+    if (ticker) {
+      return { ticker, source: gemini.source };
     }
-  } else {
-    console.error('Missing GEMINI_API_KEY');
   }
 
   if (isFundLikeName(name)) {
     const yahoo = await tryYahoo(name);
     if (yahoo) {
-      return res.status(200).json({ ticker: yahoo, source: 'Yahoo Finance' });
+      return { ticker: yahoo, source: 'Yahoo Finance' };
     }
   }
 
-  return res.status(200).json({ ticker: 'NEEDS_REVIEW', source: '—' });
+  return { ticker: 'NEEDS_REVIEW', source: '—' };
+}
+
+async function resolveBatch(names, apiKey) {
+  const results = {};
+  const unresolved = [];
+
+  if (apiKey) {
+    const gemini = await tryGeminiBatch(names, apiKey);
+    if (gemini) {
+      for (const name of names) {
+        const ticker = gemini.results.get(name);
+        if (ticker) {
+          results[name] = { ticker, source: gemini.source };
+        } else {
+          unresolved.push(name);
+        }
+      }
+    } else {
+      unresolved.push(...names);
+    }
+  } else {
+    unresolved.push(...names);
+  }
+
+  for (const name of unresolved) {
+    if (results[name]) {
+      continue;
+    }
+
+    if (isFundLikeName(name)) {
+      const yahoo = await tryYahoo(name);
+      if (yahoo) {
+        results[name] = { ticker: yahoo, source: 'Yahoo Finance' };
+        continue;
+      }
+    }
+
+    results[name] = { ticker: 'NEEDS_REVIEW', source: '—' };
+  }
+
+  return results;
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const body = req.body || {};
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error('Missing GEMINI_API_KEY');
+  }
+
+  if (Array.isArray(body.names)) {
+    const names = body.names
+      .map(name => normalizeWhitespace(name))
+      .filter(Boolean);
+
+    if (!names.length) {
+      return res.status(400).json({ error: 'Missing names' });
+    }
+
+    const results = await resolveBatch(names, apiKey);
+    return res.status(200).json({ results });
+  }
+
+  const name = normalizeWhitespace(body.name);
+  if (!name) {
+    return res.status(400).json({ error: 'Missing name' });
+  }
+
+  return res.status(200).json(await resolveName(name, apiKey));
 }

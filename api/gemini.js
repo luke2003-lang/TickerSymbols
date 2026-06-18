@@ -385,18 +385,16 @@ async function tryGeminiBatch(names, apiKey) {
 }
 
 async function resolveName(name, apiKey) {
+  const yahoo = await tryYahoo(name);
+  if (yahoo) {
+    return { ticker: yahoo, source: 'Yahoo Finance' };
+  }
+
   if (apiKey) {
     const gemini = await tryGeminiBatch([name], apiKey);
     const ticker = gemini?.results?.get(name);
     if (ticker) {
       return { ticker, source: gemini.source };
-    }
-  }
-
-  if (isFundLikeName(name)) {
-    const yahoo = await tryYahoo(name);
-    if (yahoo) {
-      return { ticker: yahoo, source: 'Yahoo Finance' };
     }
   }
 
@@ -407,37 +405,36 @@ async function resolveBatch(names, apiKey) {
   const results = {};
   const unresolved = [];
 
+  for (const name of names) {
+    const yahoo = await tryYahoo(name);
+    if (yahoo) {
+      results[name] = { ticker: yahoo, source: 'Yahoo Finance' };
+    } else {
+      unresolved.push(name);
+    }
+  }
+
+  const geminiCandidates = [];
   if (apiKey) {
-    const gemini = await tryGeminiBatch(names, apiKey);
+    geminiCandidates.push(...unresolved);
+  }
+
+  if (geminiCandidates.length && apiKey) {
+    const gemini = await tryGeminiBatch(geminiCandidates, apiKey);
     if (gemini) {
-      for (const name of names) {
+      for (const name of geminiCandidates) {
         const ticker = gemini.results.get(name);
         if (ticker) {
           results[name] = { ticker, source: gemini.source };
-        } else {
-          unresolved.push(name);
         }
       }
-    } else {
-      unresolved.push(...names);
-    }
-  } else {
-    unresolved.push(...names);
+    } 
   }
 
-  for (const name of unresolved) {
+  for (const name of geminiCandidates.length ? geminiCandidates : unresolved) {
     if (results[name]) {
       continue;
     }
-
-    if (isFundLikeName(name)) {
-      const yahoo = await tryYahoo(name);
-      if (yahoo) {
-        results[name] = { ticker: yahoo, source: 'Yahoo Finance' };
-        continue;
-      }
-    }
-
     results[name] = { ticker: 'NEEDS_REVIEW', source: '—' };
   }
 

@@ -1,0 +1,13 @@
+{
+  "name": "ticker-symbols",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check api/gemini.js && node --check api/jobs.js && node --check api/job-result.js && node --check lib/lookup.js && node --check lib/jobs.js && node --check lib/workbook.js"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.4.0",
+    "xlsx": "^0.18.5"
+  }
+}

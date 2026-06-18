@@ -1,28 +1,35 @@
-# Ticker Symbol Lookup
+# Ticker Symbols
 
-A browser-based tool to fill in missing stock ticker symbols in a spreadsheet. No server required — all processing happens in the user's browser.
+Server-side spreadsheet enrichment for missing US ticker symbols.
 
-## Deploy to Vercel (free, ~2 minutes)
+The app now uses a job flow instead of resolving everything live in the browser:
 
-1. **Create a GitHub account** at github.com if you don't have one
-2. **Create a new repository** — click the + icon → "New repository", name it `ticker-app`, set it to Public, click "Create repository"
-3. **Upload these files** — click "uploading an existing file", drag in all three files (`public/index.html`, `vercel.json`, `README.md`), click "Commit changes"
-4. **Go to vercel.com** — sign up with your GitHub account
-5. **Click "Add New Project"** → import your `ticker-app` repository → click **Deploy**
-6. Done! Vercel gives you a URL like `ticker-app.vercel.app` to share
+1. Upload a workbook with `securityName` and `tickerSymbol` columns.
+2. The server creates a job and stores the workbook.
+3. Each status poll advances the job through a chunk of unresolved names.
+4. Yahoo handles easy cases first.
+5. Gemini is only used for unresolved leftovers, with OTC symbols preferred over foreign listings.
+6. When the job completes, the app downloads a finished workbook.
 
-## How to use
+## Required Vercel setup
 
-1. Get a free Gemini API key at aistudio.google.com/app/apikey
-2. Open the app URL
-3. Enter your Gemini key
-4. Upload your spreadsheet (needs `securityName` and `tickerSymbol` columns)
-5. Click "Start lookup"
-6. Download the enriched spreadsheet
+Set these before deploying:
+
+- `GEMINI_API_KEY`
+- A Vercel Blob store connected to the project so `BLOB_READ_WRITE_TOKEN` is available
+
+Without Blob, the deployed app cannot persist jobs across requests. Local development falls back to `.tmp/jobs`.
+
+## Local development
+
+```bash
+npm install
+vercel dev
+```
 
 ## Notes
 
-- Rows with blank, `?`, or `NEEDS_REVIEW` tickers get looked up
-- Always prefers US OTC/Pink Sheets ticker over foreign exchange listings
-- `NEEDS_REVIEW` rows in the download are highlighted yellow
-- Your spreadsheet never leaves your browser
+- Rows with blank, `?`, or `NEEDS_REVIEW` tickers are candidates for lookup.
+- The app always prefers a US OTC ticker over a foreign exchange symbol.
+- `NEEDS_REVIEW` cells are highlighted yellow in the output workbook.
+- If Gemini rate-limits, the job cools down and retries later instead of immediately marking the remaining names as unresolved.

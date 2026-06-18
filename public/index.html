@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>California Inheritance Group</title>
+  <title>Ticker Symbols</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -321,7 +321,7 @@
 <body>
 
 <div class="topbar">
-  <div class="logo">California Inheritance Group</div>
+  <div class="logo">Ticker Symbols</div>
 
 </div>
 
@@ -332,7 +332,7 @@
     <header>
       <div class="eyebrow">Ticker lookup</div>
       <h1>Security identifier enrichment</h1>
-      <p>Upload a spreadsheet of holdings. Missing or unresolved ticker symbols will be identified automatically using US market data, with OTC symbols preferred over foreign exchange listings.</p>
+      <p>Upload a spreadsheet of holdings. The file is handed off to a server-side job that works through each unresolved security name, prefers US OTC symbols over foreign listings, and prepares a downloadable output workbook when complete.</p>
     </header>
 
     <div class="section-label">Upload file</div>
@@ -348,7 +348,7 @@
     <header>
       <div class="eyebrow">Preview</div>
       <h1>Review before lookup</h1>
-      <p>Confirm the rows below need ticker resolution, then start the lookup.</p>
+      <p>Confirm the rows below need ticker resolution, then start the server-side processing job.</p>
     </header>
 
     <div class="metrics">
@@ -366,14 +366,14 @@
 
     <div class="btn-row">
       <button class="secondary" onclick="goTo('step-upload')">Back</button>
-      <button class="primary" onclick="startLookup()">Start lookup →</button>
+      <button class="primary" onclick="startLookup()">Start processing →</button>
     </div>
   </div>
 
   <div id="step-running" class="step">
     <header>
       <div class="eyebrow">Running</div>
-      <h1>Looking up tickers…</h1>
+      <h1>Processing on the server…</h1>
     </header>
 
     <div class="metrics">
@@ -414,178 +414,212 @@
     </div>
   </div>
 
-  <footer>All processing occurs locally in your browser · No data is transmitted to external servers</footer>
+  <footer>Workbooks are uploaded for server-side processing and result generation · Gemini is used only for unresolved names after market-data lookup</footer>
 
 </div>
 </div>
 
 <script>
-  let df = [], ticker_cache = {}, source_cache = {};
-  const LOOKUP_BATCH_SIZE = 30;
-  const LOOKUP_BATCH_PAUSE_MS = 2500;
+  let df = [];
+  let selectedFile = null;
+  let activeJobId = '';
+  let activeJob = null;
+  let pollTimer = null;
 
   function goTo(id) {
-    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.step').forEach(step => step.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function normalizeWhitespace(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  function needsLookup(value) {
+    const normalized = normalizeWhitespace(value).toUpperCase();
+    return !normalized || normalized === '?' || normalized === 'NEEDS_REVIEW';
+  }
+
+  function clearPolling() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function queuePoll(delayMs) {
+    clearPolling();
+    pollTimer = setTimeout(() => {
+      pollJobStatus();
+    }, delayMs);
+  }
+
   const dz = document.getElementById('drop-zone');
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragover', event => {
+    event.preventDefault();
+    dz.classList.add('drag-over');
+  });
   dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]); });
+  dz.addEventListener('drop', event => {
+    event.preventDefault();
+    dz.classList.remove('drag-over');
+    handleFile(event.dataTransfer.files[0]);
+  });
 
   function handleFile(file) {
     if (!file) return;
+
+    selectedFile = file;
     const reader = new FileReader();
-    reader.onload = e => {
-      const wb = XLSX.read(e.target.result, { type: 'binary' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      df = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    reader.onload = event => {
+      const workbook = XLSX.read(event.target.result, { type: 'binary' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      df = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
       showPreview();
     };
     reader.readAsBinaryString(file);
   }
 
-  function needsLookup(val) {
-    const v = String(val ?? '').trim();
-    return !v || v === '?' || v.toLowerCase() === 'needs_review';
-  }
-
   function showPreview() {
-    const missing = df.filter(r => needsLookup(r.tickerSymbol));
-    const unique = [...new Set(missing.map(r => r.securityName).filter(Boolean))];
+    const missing = df.filter(row => needsLookup(row.tickerSymbol));
+    const unique = [...new Set(missing.map(row => normalizeWhitespace(row.securityName)).filter(Boolean))];
+
     document.getElementById('m-total').textContent = df.length;
     document.getElementById('m-missing').textContent = missing.length;
     document.getElementById('m-unique').textContent = unique.length;
-    const tbody = document.getElementById('preview-body');
-    tbody.innerHTML = missing.slice(0, 60).map(r =>
-      `<tr><td>${r.securityName ?? ''}</td><td><span class="badge badge-pending">${String(r.tickerSymbol || 'blank')}</span></td></tr>`
+    document.getElementById('preview-body').innerHTML = missing.slice(0, 60).map(row =>
+      `<tr><td>${row.securityName ?? ''}</td><td><span class="badge badge-pending">${String(row.tickerSymbol || 'blank')}</span></td></tr>`
     ).join('');
+
     goTo('step-preview');
   }
 
-  function startLookup() {
-    ticker_cache = {}; source_cache = {};
-    document.getElementById('results-body').innerHTML = '';
-    goTo('step-running');
-    runLookup();
+  async function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const commaIndex = result.indexOf(',');
+        resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+      };
+      reader.onerror = () => reject(new Error('Unable to read file'));
+      reader.readAsDataURL(file);
+    });
   }
 
-  async function runLookup() {
-    const missing = df.filter(r => needsLookup(r.tickerSymbol));
-    const unique = [...new Set(missing.map(r => r.securityName).filter(Boolean))];
-    let done = 0, found = 0, review = 0;
+  function renderJob(job) {
+    activeJob = job;
+    const processed = job.progress?.processedNames || 0;
+    const found = job.progress?.foundNames || 0;
+    const review = job.progress?.reviewNames || 0;
+    const totalUnique = job.counts?.uniqueNames || 0;
+    const percent = totalUnique ? Math.round(processed / totalUnique * 100) : 0;
 
-    const updateProgress = (name, ticker, source) => {
-      ticker_cache[name] = ticker;
-      source_cache[name] = source;
-      done++;
-      if (ticker === 'NEEDS_REVIEW') review++; else found++;
-      document.getElementById('status-text').textContent = `Processed ${done} of ${unique.length}: ${name}`;
-      document.getElementById('r-done').textContent = done;
-      document.getElementById('r-found').textContent = found;
-      document.getElementById('r-review').textContent = review;
-      document.getElementById('progress-bar').style.width = Math.round(done / unique.length * 100) + '%';
-      const badge = ticker === 'NEEDS_REVIEW' ? 'badge-review' : 'badge-found';
-      document.getElementById('results-body').insertAdjacentHTML('afterbegin',
-        `<tr>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</td>
-          <td><span class="badge ${badge}">${ticker}</span></td>
-          <td style="color:#888;font-size:12px;">${source}</td>
-        </tr>`);
-    };
+    document.getElementById('r-done').textContent = processed;
+    document.getElementById('r-found').textContent = found;
+    document.getElementById('r-review').textContent = review;
+    document.getElementById('progress-bar').style.width = `${percent}%`;
+    document.getElementById('status-text').textContent = job.message || 'Working...';
 
-    for (let i = 0; i < unique.length; i += LOOKUP_BATCH_SIZE) {
-      const batch = unique.slice(i, i + LOOKUP_BATCH_SIZE);
-      document.getElementById('status-text').textContent = `Processing ${Math.min(i + 1, unique.length)}-${Math.min(i + batch.length, unique.length)} of ${unique.length}`;
-      const batchResults = await lookupTickerBatch(batch);
+    const rows = Array.isArray(job.recentResults) ? job.recentResults : [];
+    document.getElementById('results-body').innerHTML = rows.map(result => {
+      const badge = result.ticker === 'NEEDS_REVIEW' ? 'badge-review' : 'badge-found';
+      return `<tr>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${result.name}</td>
+        <td><span class="badge ${badge}">${result.ticker}</span></td>
+        <td style="color:#888;font-size:12px;">${result.source}</td>
+      </tr>`;
+    }).join('');
+  }
 
-      for (const name of batch) {
-        const [ticker, source] = batchResults.get(name) || ['NEEDS_REVIEW', '—'];
-        updateProgress(name, ticker, source);
-      }
-      await sleep(LOOKUP_BATCH_PAUSE_MS);
-    }
-
-    document.getElementById('status-text').textContent = '✓ All done!';
-    document.getElementById('d-found').textContent = found;
-    document.getElementById('d-review').textContent = review;
-    document.getElementById('d-unchanged').textContent = df.filter(r => !needsLookup(r.tickerSymbol)).length;
+  function finishJob(job) {
+    renderJob(job);
+    document.getElementById('d-found').textContent = job.progress?.foundNames || 0;
+    document.getElementById('d-review').textContent = job.progress?.reviewNames || 0;
+    document.getElementById('d-unchanged').textContent = job.counts?.existingRows || 0;
     goTo('step-done');
   }
 
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function startLookup() {
+    if (!selectedFile) return;
 
-  async function lookupTicker(name) {
+    clearPolling();
+    activeJobId = '';
+    activeJob = null;
+    document.getElementById('results-body').innerHTML = '';
+    document.getElementById('status-text').textContent = 'Uploading workbook...';
+    document.getElementById('progress-bar').style.width = '0%';
+    goTo('step-running');
+
     try {
-      const r = await fetch('/api/gemini', {
+      const fileDataBase64 = await fileToBase64(selectedFile);
+      const response = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({
+          filename: selectedFile.name,
+          fileDataBase64
+        })
       });
-      if (!r.ok) return ['NEEDS_REVIEW', '—'];
-      const data = await r.json();
-      return [data.ticker || 'NEEDS_REVIEW', data.source || '—'];
-    } catch {
-      return ['NEEDS_REVIEW', '—'];
+
+      const job = await response.json();
+      if (!response.ok) {
+        throw new Error(job.error || 'Unable to start processing job');
+      }
+
+      activeJobId = job.id;
+      renderJob(job);
+      queuePoll(job.pollAfterMs || 1000);
+    } catch (error) {
+      document.getElementById('status-text').textContent = error.message || 'Unable to start processing job.';
     }
   }
 
-  async function lookupTickerBatch(names) {
+  async function pollJobStatus() {
+    if (!activeJobId) return;
+
     try {
-      const r = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ names })
-      });
-      if (!r.ok) return new Map(names.map(name => [name, ['NEEDS_REVIEW', '—']]));
-      const data = await r.json();
-      const results = new Map();
-      for (const name of names) {
-        const match = data.results?.[name];
-        results.set(name, [match?.ticker || 'NEEDS_REVIEW', match?.source || '—']);
+      const response = await fetch(`/api/jobs?id=${encodeURIComponent(activeJobId)}`);
+      const job = await response.json();
+      if (!response.ok) {
+        throw new Error(job.error || 'Unable to load job status');
       }
-      return results;
-    } catch {
-      return new Map(names.map(name => [name, ['NEEDS_REVIEW', '—']]));
+
+      if (job.status === 'failed') {
+        renderJob(job);
+        return;
+      }
+
+      if (job.status === 'complete' && job.resultReady) {
+        finishJob(job);
+        return;
+      }
+
+      renderJob(job);
+      queuePoll(job.pollAfterMs || 2000);
+    } catch (error) {
+      document.getElementById('status-text').textContent = error.message || 'Unable to load job status.';
+      queuePoll(5000);
     }
   }
 
   function downloadResult() {
-    const enriched = df.map(row => {
-      if (needsLookup(row.tickerSymbol) && ticker_cache[row.securityName]) {
-        return { ...row, tickerSymbol: ticker_cache[row.securityName] };
-      }
-      return row;
-    });
-
-    const ws = XLSX.utils.json_to_sheet(enriched);
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    const headers = [];
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
-      headers.push(cell ? cell.v : '');
-    }
-    const tcol = headers.indexOf('tickerSymbol');
-    if (tcol >= 0) {
-      for (let rw = 1; rw <= range.e.r; rw++) {
-        const addr = XLSX.utils.encode_cell({ r: rw, c: tcol });
-        if (ws[addr] && ws[addr].v === 'NEEDS_REVIEW') {
-          if (!ws[addr].s) ws[addr].s = {};
-          ws[addr].s.fill = { fgColor: { rgb: 'FFFF00' } };
-        }
-      }
-    }
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    XLSX.writeFile(wb, 'Ticker_Enriched.xlsx');
+    if (!activeJobId) return;
+    window.location.href = `/api/job-result?id=${encodeURIComponent(activeJobId)}`;
   }
 
   function startOver() {
-    df = []; ticker_cache = {}; source_cache = {};
+    clearPolling();
+    df = [];
+    selectedFile = null;
+    activeJobId = '';
+    activeJob = null;
     document.getElementById('file-input').value = '';
+    document.getElementById('preview-body').innerHTML = '';
+    document.getElementById('results-body').innerHTML = '';
+    document.getElementById('status-text').textContent = 'Starting...';
+    document.getElementById('progress-bar').style.width = '0%';
     goTo('step-upload');
   }
 </script>

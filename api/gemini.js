@@ -453,15 +453,22 @@ export default async function handler(req, res) {
   }
 
   if (Array.isArray(body.names)) {
-    const names = body.names
-      .map(name => normalizeWhitespace(name))
+    const originalNames = body.names
+      .map(name => String(name ?? '').trim())
       .filter(Boolean);
 
-    if (!names.length) {
+    if (!originalNames.length) {
       return res.status(400).json({ error: 'Missing names' });
     }
 
-    const results = await resolveBatch(names, apiKey);
+    const normalizedNames = originalNames.map(name => normalizeWhitespace(name));
+    const normalizedResults = await resolveBatch(normalizedNames, apiKey);
+    const results = {};
+
+    for (let i = 0; i < originalNames.length; i++) {
+      results[originalNames[i]] = normalizedResults[normalizedNames[i]] || { ticker: 'NEEDS_REVIEW', source: '—' };
+    }
+
     return res.status(200).json({ results });
   }
 

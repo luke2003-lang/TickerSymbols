@@ -332,7 +332,7 @@
     <header>
       <div class="eyebrow">Ticker lookup</div>
       <h1>Security identifier enrichment</h1>
-      <p>Upload a spreadsheet of holdings. The file is handed off to a server-side job that works through each unresolved security name, returns the current tradable US ticker, prefers US OTC symbols over foreign listings, and prepares a downloadable output workbook when complete.</p>
+      <p>Upload a spreadsheet of holdings. The file is handed off to a server-side job that works through each unresolved security name, uses reference data before AI fallbacks, returns the current tradable US ticker, prefers US OTC symbols over foreign listings, and prepares a downloadable output workbook when complete.</p>
     </header>
 
     <div class="section-label">Upload file</div>
@@ -414,7 +414,7 @@
     </div>
   </div>
 
-  <footer>Workbooks are uploaded for server-side processing and result generation · The app returns the current tradable US ticker and prefers OTC over foreign listings</footer>
+  <footer>Workbooks are uploaded for server-side processing and result generation · Reference data runs before AI fallbacks · The app returns the current tradable US ticker and prefers OTC over foreign listings</footer>
 
 </div>
 </div>

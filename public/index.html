@@ -573,6 +573,7 @@
       queuePoll(job.pollAfterMs || 1000);
     } catch (error) {
       document.getElementById('status-text').textContent = error.message || 'Unable to start processing job.';
+      document.getElementById('progress-bar').style.width = '0%';
     }
   }
 

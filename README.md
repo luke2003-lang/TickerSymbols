@@ -9,7 +9,7 @@ The app now uses a job flow instead of resolving everything live in the browser:
 1. Upload a workbook with `securityName` and `tickerSymbol` columns.
 2. The server creates a job and stores the workbook.
 3. Each status poll advances the job through a chunk of unresolved names.
-4. Massive/Polygon reference data handles matches first when `MASSIVE_API_KEY` is configured.
+4. Massive reference data handles matches first when `MASSIVE_API_KEY` is configured and healthy.
 5. Yahoo handles the remaining easy cases.
 6. Gemini is only used for unresolved leftovers, with OTC symbols preferred over foreign listings.
 7. When the job completes, the app downloads a finished workbook.
@@ -28,7 +28,7 @@ Recommended:
 Optional:
 
 - `MASSIVE_API_BASE_URL`
-  Default behavior tries `https://api.massive.com` and `https://api.polygon.io`.
+  Default behavior uses `https://api.massive.com`. Set this only if you need a different Massive-compatible base URL.
 
 Without Blob, the deployed app cannot persist jobs across requests. Local development falls back to `.tmp/jobs`.
 
@@ -45,5 +45,6 @@ vercel dev
 - The app returns the current tradable US ticker, including for renamed companies and recent ticker changes.
 - The app always prefers a US OTC ticker over a foreign exchange symbol.
 - When `MASSIVE_API_KEY` is present, reference-data matches are attempted before Yahoo and Gemini.
+- If Massive starts failing or rate-limiting within a run, the resolver cools it down and falls through to Yahoo/Gemini instead of stalling the whole batch.
 - `NEEDS_REVIEW` cells are highlighted yellow in the output workbook.
 - If Gemini rate-limits, the job cools down and retries later instead of immediately marking the remaining names as unresolved.

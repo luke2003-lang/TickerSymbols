@@ -2,6 +2,8 @@
 
 Server-side spreadsheet enrichment for missing US ticker symbols.
 
+The resolver is designed to return the current tradable US ticker. If a company has renamed itself or changed tickers, the app returns the active ticker in use today rather than an older historical symbol.
+
 The app now uses a job flow instead of resolving everything live in the browser:
 
 1. Upload a workbook with `securityName` and `tickerSymbol` columns.
@@ -30,6 +32,7 @@ vercel dev
 ## Notes
 
 - Rows with blank, `?`, or `NEEDS_REVIEW` tickers are candidates for lookup.
+- The app returns the current tradable US ticker, including for renamed companies and recent ticker changes.
 - The app always prefers a US OTC ticker over a foreign exchange symbol.
 - `NEEDS_REVIEW` cells are highlighted yellow in the output workbook.
 - If Gemini rate-limits, the job cools down and retries later instead of immediately marking the remaining names as unresolved.

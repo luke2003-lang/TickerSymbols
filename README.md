@@ -9,9 +9,9 @@ The app now uses a job flow instead of resolving everything live in the browser:
 1. Upload a workbook with `securityName` and `tickerSymbol` columns.
 2. The server creates a job and stores the workbook.
 3. Each status poll advances the job through a chunk of unresolved names.
-4. Massive reference data handles matches first when `MASSIVE_API_KEY` is configured and healthy.
-5. Yahoo handles the remaining easy cases.
-6. Gemini is only used for unresolved leftovers, with OTC symbols preferred over foreign listings.
+4. Yahoo handles the easy cases first.
+5. Massive reference data is used for remaining unresolved names when `MASSIVE_API_KEY` is configured and healthy.
+6. Gemini is only used for the leftovers after Yahoo and Massive, with OTC symbols preferred over foreign listings.
 7. When the job completes, the app downloads a finished workbook.
 
 ## Required Vercel setup
@@ -44,7 +44,7 @@ vercel dev
 - Rows with blank, `?`, or `NEEDS_REVIEW` tickers are candidates for lookup.
 - The app returns the current tradable US ticker, including for renamed companies and recent ticker changes.
 - The app always prefers a US OTC ticker over a foreign exchange symbol.
-- When `MASSIVE_API_KEY` is present, reference-data matches are attempted before Yahoo and Gemini.
+- When `MASSIVE_API_KEY` is present, Massive is reserved for Yahoo misses so the app spends that quota where it helps most.
 - If Massive starts failing or rate-limiting within a run, the resolver cools it down and falls through to Yahoo/Gemini instead of stalling the whole batch.
 - `NEEDS_REVIEW` cells are highlighted yellow in the output workbook.
 - If Gemini rate-limits, the job cools down and retries later instead of immediately marking the remaining names as unresolved.
